@@ -25,9 +25,13 @@ Server (your Mac)
   |
   | Phone polls GET /outbox
   v
+Server (your Mac)
+  |
+  | Kokoro TTS (server-side) → WAV audio
+  v
 Phone (Safari)
   |
-  | Kokoro TTS (92MB, runs in browser)
+  | Plays audio
   v
 You hear the response
 ```
@@ -36,7 +40,7 @@ You hear the response
 
 - **Mac** with Apple Silicon (for mlx-whisper)
 - **Tailscale** on both your Mac and phone ([download](https://tailscale.com/download))
-- **Python 3.11+** with dependencies: `pip install starlette uvicorn mlx-whisper`
+- **Python 3.11+** with dependencies: `pip install starlette uvicorn mlx-whisper kokoro-onnx soundfile`
 - **ffmpeg**: `brew install ffmpeg`
 - **Claude Code** running on your Mac
 
@@ -44,19 +48,23 @@ You hear the response
 
 ```bash
 # 1. Install dependencies
-pip install starlette uvicorn mlx-whisper
+pip install starlette uvicorn mlx-whisper kokoro-onnx soundfile
 brew install ffmpeg
 
-# 2. Start the server
+# 2. Download Kokoro model files (~337MB total, one-time)
+wget -P /tmp https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/kokoro-v1.0.onnx
+wget -P /tmp https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/voices-v1.0.bin
+
+# 3. Start the server
 python server.py
 
-# 3. Enable HTTPS via Tailscale (required for mic access on iOS Safari)
+# 4. Enable HTTPS via Tailscale (required for mic access on iOS Safari)
 tailscale serve --bg 8767
 
-# 4. Scan the QR code from your phone, or visit:
+# 5. Scan the QR code from your phone, or visit:
 #    https://<your-tailscale-hostname>/
 
-# 5. In Claude Code, set up a /loop to process voice messages:
+# 6. In Claude Code, set up a /loop to process voice messages:
 #    /loop 1m Check /tmp/claude_voice_inbox.jsonl for new entries...
 ```
 
@@ -68,11 +76,9 @@ tailscale serve --bg 8767
 4. **Tap the green button** to hear the response
 5. **Barge in** — tap during playback to interrupt and record a new message
 
-First time playing audio downloads the Kokoro TTS model (~92MB). It's cached after that.
-
 ## Voice Engine
 
-Drive Coding uses [Kokoro TTS](https://huggingface.co/hexgrad/kokoro-82m) running entirely in your browser via ONNX/WebAssembly. No cloud TTS APIs. Falls back to browser speechSynthesis if Kokoro can't load.
+Drive Coding uses [Kokoro TTS](https://huggingface.co/hexgrad/kokoro-82m) running server-side via `kokoro-onnx`. Your Mac generates the audio, sends it as WAV to the phone, which just plays it. No cloud TTS APIs. Falls back to browser speechSynthesis if Kokoro model files aren't present.
 
 ## Architecture
 
@@ -80,8 +86,8 @@ Two files. That's it.
 
 | File | What |
 |------|------|
-| `server.py` | Starlette HTTP server. Receives audio, transcribes with Whisper, serves the page, polls for Claude's response. |
-| `page.html` | Single-page app. Walkie-talkie UI, MediaRecorder for audio capture, Kokoro TTS for playback. |
+| `server.py` | Starlette HTTP server. Receives audio, transcribes with Whisper, generates speech with Kokoro, serves the page, polls for Claude's response. |
+| `page.html` | Single-page app. Walkie-talkie UI, MediaRecorder for audio capture, plays server-generated audio. |
 
 Communication happens through two temp files:
 - `/tmp/claude_voice_inbox.jsonl` — phone → Claude Code
