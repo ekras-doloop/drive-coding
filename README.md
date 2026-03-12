@@ -2,9 +2,11 @@
 
 **Vibe Coding, but on the go.** Talk to Claude Code from your phone while you drive, walk, or ride.
 
-Drive Coding is an MCP server that gives Claude Code voice I/O from your phone. Record a voice message, it gets transcribed by Whisper, Claude Code processes it via MCP tools, and you hear the response spoken back via Kokoro TTS — all running locally on your own hardware over Tailscale VPN.
+Drive Coding is an MCP server that gives Claude Code voice I/O from your phone. Record a voice message, it gets transcribed by Whisper, Claude Code processes it via MCP tools, and you hear the response spoken back via Kokoro TTS.
 
-No cloud APIs for voice. No subscriptions. Your voice never leaves your network.
+Everything runs on your own hardware. Your voice travels over your Tailscale VPN, gets transcribed on your Mac, and never touches a cloud API. There is no server you don't own. There is no endpoint you didn't start. The only network involved is the one where every device is already yours.
+
+*Drive Coding was built using Drive Coding. The tool was its own first user — described from a car, built by Claude Code, tested on the same call.*
 
 ## How It Works
 
@@ -13,9 +15,9 @@ Phone (Safari)
   |
   | Record voice → POST /inbox-audio
   v
-Server (your Mac)
+Your Mac (Tailscale VPN)
   |
-  | ffmpeg → wav → mlx-whisper STT
+  | ffmpeg → wav → mlx-whisper STT (local, on-device)
   v
 /tmp/claude_voice_inbox.jsonl
   |
@@ -25,16 +27,14 @@ Server (your Mac)
   |
   | Phone polls GET /outbox
   v
-Server (your Mac)
+Your Mac
   |
-  | Kokoro TTS (server-side) → WAV audio
+  | Kokoro TTS (local, on-device) → WAV audio
   v
-Phone (Safari)
-  |
-  | Plays audio
-  v
-You hear the response
+Phone plays audio
 ```
+
+**Nothing leaves your network.** STT is mlx-whisper on your Mac. TTS is Kokoro on your Mac. The HTTP server only binds to your Tailscale mesh. The phone connects over your private VPN. There is no cloud hop.
 
 ## Quick Start
 
@@ -74,7 +74,7 @@ Add to your `~/.claude/mcp.json`:
 }
 ```
 
-Then restart Claude Code. It will have three new tools:
+Restart Claude Code. It will have three new tools:
 
 | Tool | What it does |
 |------|-------------|
@@ -91,6 +91,18 @@ Claude Code can check for messages on its own, or you can ask it: *"check my voi
 3. **Wait** for Claude Code to process (button pulses blue)
 4. **Tap the green button** to hear the response
 5. **Barge in** — tap during playback to interrupt and record a new message
+
+## Security
+
+This is the safest voice-to-code setup possible:
+
+- **Tailscale mesh only.** No public URLs. No ports open to the internet. Every device on the network is one you own and authenticated.
+- **Local STT.** mlx-whisper runs on your Mac. Your voice audio is never uploaded anywhere.
+- **Local TTS.** Kokoro runs on your Mac. Generated speech never leaves your machine.
+- **No cloud APIs.** No OpenAI Whisper API. No ElevenLabs. No Google Cloud Speech. Nothing.
+- **No auth layer needed.** Tailscale handles identity — if you can reach the URL, you're already on the mesh.
+
+Your voice goes from your phone to your Mac over an encrypted Tailscale tunnel. It gets transcribed into text on your Mac. Claude Code reads the text. The response gets synthesized into audio on your Mac. Your phone plays it. At no point does any audio or text leave your private network.
 
 ## Requirements
 
@@ -117,10 +129,6 @@ Three files.
 Communication between phone and Claude Code happens through two temp files:
 - `/tmp/claude_voice_inbox.jsonl` — phone → Claude Code
 - `/tmp/claude_voice_outbox.txt` — Claude Code → phone
-
-## Security
-
-All traffic stays on your Tailscale mesh. No public URLs. No authentication needed — Tailscale handles identity. Voice audio is transcribed locally by mlx-whisper. It never hits an external API.
 
 ## License
 
