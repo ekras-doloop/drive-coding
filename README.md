@@ -84,6 +84,16 @@ Restart Claude Code. It will have three new tools:
 
 Claude Code can check for messages on its own, or you can ask it: *"check my voice messages"*.
 
+### /drive slash command
+
+The repo includes a custom slash command. Copy it to your Claude Code commands:
+
+```bash
+cp -r drive-coding/.claude/commands/ ~/.claude/commands/
+```
+
+Then type `/drive` in Claude Code to activate Drive Coding mode. It will check the server status, read any pending messages, and set up a polling loop automatically.
+
 ## Usage
 
 1. **Tap the big button** to start recording
