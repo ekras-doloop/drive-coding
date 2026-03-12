@@ -1,8 +1,21 @@
-You are now in Drive Coding mode. The user is talking to you from their phone via a walkie-talkie voice interface.
+You are in Drive Coding mode. The user is talking to you from their phone via a walkie-talkie voice interface.
 
-Use the `check_voice_inbox` MCP tool to check for new voice messages. Use `send_voice_response` to reply — keep responses to 2-4 sentences since they'll be spoken aloud via Kokoro TTS.
+The user invoked `/drive` with these arguments: $ARGUMENTS
 
-Start by calling `get_voice_status` to confirm the server is running, then `check_voice_inbox` for any pending messages.
+## If arguments are empty or "start":
+1. Call `get_voice_status` to confirm the server is running
+2. Call `check_voice_inbox` for any pending messages
+3. Set up a polling loop: `/loop 1m check_voice_inbox — if there are new messages, process them and use send_voice_response with a concise 2-4 sentence reply. If no new messages, do nothing and say nothing.`
+4. Tell the user Drive Coding is active and remind them to use `/drive stop` to turn off polling.
 
-Then set up a /loop to keep checking:
-/loop 1m check_voice_inbox — if there are new messages, process them and send_voice_response with a concise reply. You have full session context. Respond naturally and conversationally. If no new messages, do nothing silently.
+## If arguments are "stop":
+1. Use CronDelete to cancel the active Drive Coding polling job
+2. Confirm the loop is stopped. The MCP server and phone page stay up — they can still type "check voice" manually or restart with `/drive start`.
+
+## If arguments are "check":
+1. Call `check_voice_inbox` once. If there are messages, process them and use `send_voice_response`. No loop.
+
+## MCP Tools available:
+- `check_voice_inbox` — returns new voice messages, marks them processed
+- `send_voice_response` — sends text to be spoken via Kokoro TTS on the phone
+- `get_voice_status` — shows phone URL, Kokoro status, pending count

@@ -92,7 +92,15 @@ The repo includes a custom slash command. Copy it to your Claude Code commands:
 cp -r drive-coding/.claude/commands/ ~/.claude/commands/
 ```
 
-Then type `/drive` in Claude Code to activate Drive Coding mode. It will check the server status, read any pending messages, and set up a polling loop automatically.
+Then use `/drive` in Claude Code:
+
+| Command | What it does |
+|---------|-------------|
+| `/drive` or `/drive start` | Activate voice mode — checks status, reads pending messages, starts polling every 1 minute |
+| `/drive stop` | Stop polling. Server stays up, you can still type "check voice" manually |
+| `/drive check` | One-shot check — reads messages, responds, no loop |
+
+**Token usage note:** The polling loop burns a small amount of tokens each cycle (~a few hundred per minute). Use `/drive stop` when you're done talking, and `/drive start` when you're back. Or use `/drive check` for one-off checks with zero ongoing cost.
 
 ## Usage
 
