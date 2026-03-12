@@ -24,8 +24,8 @@ from mcp.server.fastmcp import FastMCP
 # ─── Config ─────────────────────────────────────────────────
 INBOX = Path("/tmp/claude_voice_inbox.jsonl")
 OUTBOX = Path("/tmp/claude_voice_outbox.txt")
-KOKORO_MODEL = Path("/tmp/kokoro-v1.0.onnx")
-KOKORO_VOICES = Path("/tmp/voices-v1.0.bin")
+KOKORO_MODEL = Path(os.path.expanduser("~/Library/Caches/kokoro/kokoro-v1.0.onnx"))
+KOKORO_VOICES = Path(os.path.expanduser("~/Library/Caches/kokoro/voices-v1.0.bin"))
 PORT = 8767
 
 # ─── Kokoro TTS (lazy-loaded) ───────────────────────────────
