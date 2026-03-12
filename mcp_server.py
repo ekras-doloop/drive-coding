@@ -19,6 +19,8 @@ import time
 from datetime import datetime
 from pathlib import Path
 
+from mcp.server.fastmcp import FastMCP
+
 # ─── Config ─────────────────────────────────────────────────
 INBOX = Path("/tmp/claude_voice_inbox.jsonl")
 OUTBOX = Path("/tmp/claude_voice_outbox.txt")
@@ -43,7 +45,6 @@ def get_kokoro():
 # ─── Inbox/Outbox helpers ───────────────────────────────────
 
 def read_unprocessed():
-    """Read all unprocessed messages from inbox."""
     if not INBOX.exists():
         return []
     messages = []
@@ -61,7 +62,6 @@ def read_unprocessed():
 
 
 def mark_processed(timestamps):
-    """Mark messages with given timestamps as processed."""
     if not INBOX.exists():
         return
     lines = INBOX.read_text().strip().split("\n")
@@ -80,14 +80,37 @@ def mark_processed(timestamps):
 
 
 def write_outbox(text):
-    """Write response to outbox for phone to pick up."""
     OUTBOX.write_text(text)
+
+
+# ─── Tailscale helpers ──────────────────────────────────────
+
+def get_tailscale_url():
+    try:
+        result = subprocess.run(
+            ["tailscale", "status", "--json"],
+            capture_output=True, text=True, timeout=5)
+        data = json.loads(result.stdout)
+        dns_name = data.get("Self", {}).get("DNSName", "")
+        if dns_name:
+            return f"https://{dns_name.rstrip('.')}"
+    except (FileNotFoundError, subprocess.TimeoutExpired, json.JSONDecodeError):
+        pass
+    try:
+        result = subprocess.run(
+            ["tailscale", "ip", "-4"],
+            capture_output=True, text=True, timeout=5)
+        ip = result.stdout.strip()
+        if ip:
+            return f"http://{ip}:{PORT}"
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        pass
+    return f"http://localhost:{PORT}"
 
 
 # ─── HTTP Server (runs in background thread) ────────────────
 
 def start_http_server():
-    """Start the Starlette HTTP server for the phone."""
     from starlette.applications import Starlette
     from starlette.responses import HTMLResponse, Response
     from starlette.routing import Route
@@ -196,7 +219,6 @@ def start_http_server():
         Route("/health", health),
     ])
 
-    # Redirect uvicorn logs to stderr (stdout is MCP stdio)
     uvicorn.run(app, host="0.0.0.0", port=PORT, log_level="warning",
                 log_config=None)
 
@@ -225,176 +247,51 @@ def transcribe_audio(wav_path):
         return ""
 
 
-# ─── Tailscale helpers ──────────────────────────────────────
+# ─── MCP Server (FastMCP) ───────────────────────────────────
 
-def get_tailscale_url():
-    try:
-        result = subprocess.run(
-            ["tailscale", "status", "--json"],
-            capture_output=True, text=True, timeout=5)
-        data = json.loads(result.stdout)
-        dns_name = data.get("Self", {}).get("DNSName", "")
-        if dns_name:
-            return f"https://{dns_name.rstrip('.')}"
-    except (FileNotFoundError, subprocess.TimeoutExpired, json.JSONDecodeError):
-        pass
-    try:
-        result = subprocess.run(
-            ["tailscale", "ip", "-4"],
-            capture_output=True, text=True, timeout=5)
-        ip = result.stdout.strip()
-        if ip:
-            return f"http://{ip}:{PORT}"
-    except (FileNotFoundError, subprocess.TimeoutExpired):
-        pass
-    return f"http://localhost:{PORT}"
+mcp = FastMCP("drive-coding")
 
 
-# ─── MCP Protocol (stdio JSON-RPC) ─────────────────────────
-
-def send_response(id, result):
-    msg = json.dumps({"jsonrpc": "2.0", "id": id, "result": result})
-    sys.stdout.write(f"Content-Length: {len(msg)}\r\n\r\n{msg}")
-    sys.stdout.flush()
-
-
-def send_notification(method, params=None):
-    msg = json.dumps({"jsonrpc": "2.0", "method": method, "params": params or {}})
-    sys.stdout.write(f"Content-Length: {len(msg)}\r\n\r\n{msg}")
-    sys.stdout.flush()
-
-
-def read_message():
-    """Read a JSON-RPC message from stdin (MCP stdio transport)."""
-    headers = {}
-    while True:
-        line = sys.stdin.readline()
-        if not line:
-            return None  # EOF
-        line = line.strip()
-        if line == "":
-            break
-        if ":" in line:
-            key, value = line.split(":", 1)
-            headers[key.strip()] = value.strip()
-    content_length = int(headers.get("Content-Length", 0))
-    if content_length == 0:
-        return None
-    body = sys.stdin.read(content_length)
-    return json.loads(body)
+@mcp.tool()
+def check_voice_inbox() -> str:
+    """Check for new voice messages from the caller's phone. Returns unprocessed messages and marks them as processed."""
+    messages = read_unprocessed()
+    if not messages:
+        return "No new voice messages."
+    timestamps = [m["timestamp"] for m in messages]
+    texts = []
+    for m in messages:
+        ts = m["timestamp"].split("T")[1][:8]
+        texts.append(f"[{ts}] {m['text']}")
+    mark_processed(timestamps)
+    combined = "\n".join(texts)
+    return f"{len(messages)} new message(s):\n{combined}"
 
 
-TOOLS = [
-    {
-        "name": "check_voice_inbox",
-        "description": "Check for new voice messages from the caller's phone. Returns unprocessed messages and marks them as processed. Call this periodically or when prompted.",
-        "inputSchema": {
-            "type": "object",
-            "properties": {},
-        },
-    },
-    {
-        "name": "send_voice_response",
-        "description": "Send a text response that will be spoken to the caller via Kokoro TTS on their phone. Keep responses concise (2-4 sentences) since they'll be spoken aloud.",
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "text": {
-                    "type": "string",
-                    "description": "The response text to speak to the caller",
-                },
-            },
-            "required": ["text"],
-        },
-    },
-    {
-        "name": "get_voice_status",
-        "description": "Get the status of Drive Coding: phone URL, whether Kokoro TTS is available, and pending message count.",
-        "inputSchema": {
-            "type": "object",
-            "properties": {},
-        },
-    },
-]
+@mcp.tool()
+def send_voice_response(text: str) -> str:
+    """Send a text response that will be spoken to the caller via Kokoro TTS on their phone. Keep responses concise (2-4 sentences) since they'll be spoken aloud."""
+    text = text.strip()
+    if not text:
+        return "Error: no text provided"
+    write_outbox(text)
+    return f"Response sent to phone: {text[:80]}..."
 
 
-def handle_tool_call(name, arguments):
-    if name == "check_voice_inbox":
-        messages = read_unprocessed()
-        if not messages:
-            return {"content": [{"type": "text", "text": "No new voice messages."}]}
-        timestamps = [m["timestamp"] for m in messages]
-        texts = []
-        for m in messages:
-            ts = m["timestamp"].split("T")[1][:8]
-            texts.append(f"[{ts}] {m['text']}")
-        mark_processed(timestamps)
-        combined = "\n".join(texts)
-        return {"content": [{"type": "text", "text": f"{len(messages)} new message(s):\n{combined}"}]}
-
-    elif name == "send_voice_response":
-        text = arguments.get("text", "").strip()
-        if not text:
-            return {"content": [{"type": "text", "text": "Error: no text provided"}], "isError": True}
-        write_outbox(text)
-        return {"content": [{"type": "text", "text": f"Response sent to phone: {text[:80]}..."}]}
-
-    elif name == "get_voice_status":
-        url = get_tailscale_url()
-        kokoro_ok = KOKORO_MODEL.exists() and KOKORO_VOICES.exists()
-        pending = len(read_unprocessed())
-        status = (
-            f"Drive Coding status:\n"
-            f"  Phone URL: {url}\n"
-            f"  Kokoro TTS: {'ready' if kokoro_ok else 'not found (install model files)'}\n"
-            f"  Pending messages: {pending}\n"
-            f"  Inbox: {INBOX}\n"
-            f"  Outbox: {OUTBOX}"
-        )
-        return {"content": [{"type": "text", "text": status}]}
-
-    return {"content": [{"type": "text", "text": f"Unknown tool: {name}"}], "isError": True}
-
-
-def mcp_loop():
-    """Main MCP message loop."""
-    while True:
-        msg = read_message()
-        if msg is None:
-            break
-
-        method = msg.get("method", "")
-        id = msg.get("id")
-        params = msg.get("params", {})
-
-        if method == "initialize":
-            send_response(id, {
-                "protocolVersion": "2024-11-05",
-                "capabilities": {"tools": {}},
-                "serverInfo": {
-                    "name": "drive-coding",
-                    "version": "1.0.0",
-                },
-            })
-
-        elif method == "notifications/initialized":
-            pass  # Client ack, nothing to do
-
-        elif method == "tools/list":
-            send_response(id, {"tools": TOOLS})
-
-        elif method == "tools/call":
-            name = params.get("name", "")
-            arguments = params.get("arguments", {})
-            result = handle_tool_call(name, arguments)
-            send_response(id, result)
-
-        elif method == "ping":
-            send_response(id, {})
-
-        elif id is not None:
-            # Unknown method with an ID — respond with error
-            send_response(id, {"error": {"code": -32601, "message": f"Unknown method: {method}"}})
+@mcp.tool()
+def get_voice_status() -> str:
+    """Get the status of Drive Coding: phone URL, whether Kokoro TTS is available, and pending message count."""
+    url = get_tailscale_url()
+    kokoro_ok = KOKORO_MODEL.exists() and KOKORO_VOICES.exists()
+    pending = len(read_unprocessed())
+    return (
+        f"Drive Coding status:\n"
+        f"  Phone URL: {url}\n"
+        f"  Kokoro TTS: {'ready' if kokoro_ok else 'not found (install model files)'}\n"
+        f"  Pending messages: {pending}\n"
+        f"  Inbox: {INBOX}\n"
+        f"  Outbox: {OUTBOX}"
+    )
 
 
 # ─── Main ────────────────────────────────────────────────────
@@ -410,5 +307,5 @@ if __name__ == "__main__":
     print(f"  Phone URL: {url}", file=sys.stderr)
     print(f"  Run: tailscale serve --bg {PORT}", file=sys.stderr)
 
-    # Run MCP loop on main thread
-    mcp_loop()
+    # Run MCP server on main thread (stdio transport)
+    mcp.run(transport="stdio")
