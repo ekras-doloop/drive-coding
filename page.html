@@ -1,0 +1,596 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Drive Coding</title>
+<style>
+  :root {
+    --bg: #0d1117;
+    --surface: #161b22;
+    --border: #30363d;
+    --text: #e6edf3;
+    --muted: #8b949e;
+    --accent: #58a6ff;
+    --recording: #f85149;
+    --success: #3fb950;
+    --play: #3fb950;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'SF Pro', system-ui, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    -webkit-user-select: none;
+    user-select: none;
+  }
+  header {
+    padding: 12px 20px 10px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  header h1 { font-size: 17px; font-weight: 600; letter-spacing: -0.3px; }
+  .status {
+    font-size: 12px;
+    color: var(--muted);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .status-dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: var(--success);
+  }
+  .status-dot.active { background: var(--accent); animation: pulse 1.5s infinite; }
+  .status-dot.recording { background: var(--recording); animation: pulse 0.8s infinite; }
+  .status-dot.ready-play { background: var(--play); }
+  .status-dot.loading { background: #d29922; animation: pulse 1.2s infinite; }
+  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
+
+  #transcript {
+    flex: 1;
+    overflow-y: auto;
+    padding: 12px 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    -webkit-overflow-scrolling: touch;
+  }
+  .msg {
+    max-width: 85%;
+    padding: 10px 14px;
+    border-radius: 16px;
+    font-size: 15px;
+    line-height: 1.4;
+    word-wrap: break-word;
+  }
+  .msg.user {
+    align-self: flex-end;
+    background: var(--accent);
+    color: #fff;
+    border-bottom-right-radius: 4px;
+  }
+  .msg.assistant {
+    align-self: flex-start;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-bottom-left-radius: 4px;
+  }
+  .msg .meta { font-size: 11px; color: var(--muted); margin-top: 4px; }
+  .msg.user .meta { color: rgba(255,255,255,0.6); }
+
+  .controls {
+    padding: 12px 20px 24px;
+    border-top: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    align-items: center;
+  }
+
+  /* The Big Button */
+  #walkie-btn {
+    width: 96px;
+    height: 96px;
+    border-radius: 50%;
+    border: 4px solid var(--accent);
+    background: transparent;
+    color: var(--accent);
+    font-size: 14px;
+    font-weight: 600;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    cursor: pointer;
+    transition: all 0.2s;
+    -webkit-tap-highlight-color: transparent;
+  }
+  #walkie-btn .icon { font-size: 32px; line-height: 1; }
+  #walkie-btn .label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; }
+
+  #walkie-btn.recording {
+    border-color: var(--recording);
+    background: var(--recording);
+    color: #fff;
+    animation: pulse-border 1s infinite;
+  }
+  #walkie-btn.waiting {
+    border-color: var(--accent);
+    color: var(--muted);
+    opacity: 0.5;
+    pointer-events: none;
+  }
+  #walkie-btn.play-ready {
+    border-color: var(--play);
+    background: var(--play);
+    color: #fff;
+    animation: pulse-border-green 1.5s infinite;
+  }
+  #walkie-btn.speaking {
+    border-color: var(--play);
+    color: var(--play);
+    opacity: 0.8;
+  }
+  @keyframes pulse-border {
+    0%,100% { box-shadow: 0 0 0 0 rgba(248,81,73,0.4); }
+    50% { box-shadow: 0 0 0 14px rgba(248,81,73,0); }
+  }
+  @keyframes pulse-border-green {
+    0%,100% { box-shadow: 0 0 0 0 rgba(63,185,80,0.4); }
+    50% { box-shadow: 0 0 0 14px rgba(63,185,80,0); }
+  }
+
+  .text-input-row {
+    display: flex;
+    gap: 8px;
+    width: 100%;
+  }
+  #text-input {
+    flex: 1;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 10px 14px;
+    border-radius: 20px;
+    font-size: 14px;
+    outline: none;
+  }
+  #text-input:focus { border-color: var(--accent); }
+  #send-btn {
+    width: 40px; height: 40px;
+    border-radius: 50%;
+    border: none;
+    background: var(--accent);
+    color: #fff;
+    font-size: 16px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .settings {
+    display: flex;
+    gap: 16px;
+    font-size: 11px;
+    color: var(--muted);
+  }
+  .settings label { display: flex; align-items: center; gap: 4px; }
+  .settings input[type="range"] { width: 60px; }
+  #loop-val { min-width: 20px; text-align: center; }
+
+  /* TTS loading bar */
+  .tts-loading {
+    width: 100%;
+    max-width: 280px;
+    height: 4px;
+    background: var(--border);
+    border-radius: 2px;
+    overflow: hidden;
+    display: none;
+  }
+  .tts-loading.visible { display: block; }
+  .tts-loading-bar {
+    height: 100%;
+    background: var(--accent);
+    width: 0%;
+    transition: width 0.3s;
+    border-radius: 2px;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Drive Coding</h1>
+  <div class="status">
+    <div class="status-dot" id="status-dot"></div>
+    <span id="status-text">Ready</span>
+  </div>
+</header>
+
+<div id="transcript"></div>
+
+<div class="controls">
+  <button id="walkie-btn">
+    <span class="icon" id="btn-icon">&#x1F3A4;</span>
+    <span class="label" id="btn-label">Record</span>
+  </button>
+  <div class="tts-loading" id="tts-loading">
+    <div class="tts-loading-bar" id="tts-loading-bar"></div>
+  </div>
+  <div class="text-input-row">
+    <input type="text" id="text-input" placeholder="or type..." autocomplete="off" autocorrect="on">
+    <button id="send-btn">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
+    </button>
+  </div>
+  <div class="settings">
+    <label>Poll <input type="range" id="loop-speed" min="2" max="30" value="5" step="1"><span id="loop-val">5s</span></label>
+  </div>
+</div>
+
+<script type="module">
+import { KokoroTTS } from "https://cdn.jsdelivr.net/npm/kokoro-js@1.2.1/+esm";
+
+// ─── Kokoro TTS engine ──────────────────────────────────────
+let kokoroTTS = null;
+let kokoroLoading = false;
+const KOKORO_VOICE = 'af_heart'; // American female, Grade A
+
+const ttsLoadingDiv = document.getElementById('tts-loading');
+const ttsLoadingBar = document.getElementById('tts-loading-bar');
+
+async function loadKokoro() {
+  if (kokoroTTS) return kokoroTTS;
+  if (kokoroLoading) return null;
+  kokoroLoading = true;
+  ttsLoadingDiv.classList.add('visible');
+  ttsLoadingBar.style.width = '10%';
+  setStatus('Loading Kokoro TTS (~92MB)...');
+  statusDot.className = 'status-dot loading';
+  try {
+    ttsLoadingBar.style.width = '30%';
+    kokoroTTS = await KokoroTTS.from_pretrained("onnx-community/Kokoro-82M-v1.0-ONNX", {
+      dtype: "q8",
+      device: "wasm",
+    });
+    ttsLoadingBar.style.width = '100%';
+    setTimeout(() => { ttsLoadingDiv.classList.remove('visible'); }, 1000);
+    setStatus('Kokoro ready');
+    statusDot.className = 'status-dot';
+    return kokoroTTS;
+  } catch (e) {
+    console.error('Kokoro load failed:', e);
+    ttsLoadingDiv.classList.remove('visible');
+    setStatus('Kokoro failed — using browser TTS');
+    kokoroLoading = false;
+    return null;
+  }
+}
+
+// ─── State machine ──────────────────────────────────────────
+let state = 'idle';
+let mediaRecorder = null;
+let audioChunks = [];
+let pollTimer = null;
+let pendingText = '';
+let currentAudioSource = null;
+let audioCtx = null;
+
+const transcript = document.getElementById('transcript');
+const walkieBtn = document.getElementById('walkie-btn');
+const btnIcon = document.getElementById('btn-icon');
+const btnLabel = document.getElementById('btn-label');
+const statusDot = document.getElementById('status-dot');
+const statusText = document.getElementById('status-text');
+const loopSpeed = document.getElementById('loop-speed');
+const loopVal = document.getElementById('loop-val');
+const textInput = document.getElementById('text-input');
+const sendBtn = document.getElementById('send-btn');
+const synth = window.speechSynthesis;
+
+function setState(newState) {
+  state = newState;
+  walkieBtn.className = '';
+  statusDot.className = 'status-dot';
+  switch (state) {
+    case 'idle':
+      btnIcon.textContent = '\u{1F3A4}';
+      btnLabel.textContent = 'Record';
+      setStatus('Tap to talk', '');
+      break;
+    case 'recording':
+      walkieBtn.className = 'recording';
+      statusDot.className = 'status-dot recording';
+      btnIcon.textContent = '\u{23F9}';
+      btnLabel.textContent = 'Stop';
+      setStatus('Recording...', '');
+      break;
+    case 'sending':
+      walkieBtn.className = 'waiting';
+      statusDot.className = 'status-dot active';
+      btnIcon.textContent = '\u{2197}';
+      btnLabel.textContent = 'Sending';
+      setStatus('Transcribing...', '');
+      break;
+    case 'waiting':
+      walkieBtn.className = 'waiting';
+      statusDot.className = 'status-dot active';
+      btnIcon.textContent = '\u{231B}';
+      btnLabel.textContent = 'Waiting';
+      setStatus('Waiting for Claude...', '');
+      break;
+    case 'play-ready':
+      walkieBtn.className = 'play-ready';
+      statusDot.className = 'status-dot ready-play';
+      btnIcon.textContent = '\u{25B6}';
+      btnLabel.textContent = 'Play';
+      setStatus('Response ready \u2014 tap to hear', '');
+      break;
+    case 'speaking':
+      walkieBtn.className = 'speaking';
+      statusDot.className = 'status-dot active';
+      btnIcon.textContent = '\u{1F50A}';
+      btnLabel.textContent = 'Playing';
+      setStatus('Speaking...', '');
+      break;
+  }
+}
+
+// ─── The Big Button handler ──────────────────────────────────
+walkieBtn.addEventListener('click', async () => {
+  switch (state) {
+    case 'idle':
+      startRecording();
+      break;
+    case 'recording':
+      stopRecording();
+      break;
+    case 'play-ready':
+      playResponse();
+      break;
+    case 'speaking':
+      // Barge-in: kill audio, start recording
+      stopAudio();
+      pendingText = '';
+      startRecording();
+      break;
+  }
+});
+
+// ─── Stop any playing audio ─────────────────────────────────
+function stopAudio() {
+  if (currentAudioSource) {
+    try { currentAudioSource.stop(); } catch(e) {}
+    currentAudioSource = null;
+  }
+  synth.cancel();
+}
+
+// ─── MediaRecorder ───────────────────────────────────────────
+async function startRecording() {
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+      ? 'audio/webm;codecs=opus' : 'audio/mp4';
+    mediaRecorder = new MediaRecorder(stream, { mimeType });
+    audioChunks = [];
+    mediaRecorder.ondataavailable = (e) => {
+      if (e.data.size > 0) audioChunks.push(e.data);
+    };
+    mediaRecorder.onstop = async () => {
+      stream.getTracks().forEach(t => t.stop());
+      if (audioChunks.length === 0) { setState('idle'); return; }
+      const blob = new Blob(audioChunks, { type: mimeType });
+      if (blob.size < 1000) { setState('idle'); return; }
+      await sendAudio(blob, mimeType);
+    };
+    mediaRecorder.start();
+    setState('recording');
+  } catch (e) {
+    console.error('Mic error:', e);
+    setStatus('Mic access denied', '');
+  }
+}
+
+function stopRecording() {
+  if (mediaRecorder && state === 'recording') {
+    setState('sending');
+    mediaRecorder.stop();
+  }
+}
+
+// ─── Send audio to server ────────────────────────────────────
+async function sendAudio(blob, mimeType) {
+  const formData = new FormData();
+  const ext = mimeType.includes('mp4') ? 'mp4' : 'webm';
+  formData.append('audio', blob, `recording.${ext}`);
+  try {
+    const r = await fetch('/inbox-audio', { method: 'POST', body: formData });
+    const data = await r.json();
+    if (data.text && data.text.trim()) {
+      addMessage(data.text, 'user');
+      setState('waiting');
+      startPolling();
+    } else {
+      setStatus('No speech detected', '');
+      setTimeout(() => setState('idle'), 1500);
+    }
+  } catch (e) {
+    console.error(e);
+    setStatus('Send failed', '');
+    setTimeout(() => setState('idle'), 1500);
+  }
+}
+
+// ─── Text input (fallback) ───────────────────────────────────
+async function sendToInbox(text) {
+  addMessage(text, 'user');
+  setState('waiting');
+  try {
+    const r = await fetch('/inbox', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text }),
+    });
+    if (r.ok) startPolling();
+  } catch (e) {
+    setStatus('Send failed', '');
+    setTimeout(() => setState('idle'), 1500);
+  }
+}
+
+// ─── Poll for response ───────────────────────────────────────
+function startPolling() {
+  if (pollTimer) clearInterval(pollTimer);
+  const interval = parseInt(loopSpeed.value) * 1000;
+  pollOutbox();
+  pollTimer = setInterval(pollOutbox, interval);
+}
+
+async function pollOutbox() {
+  try {
+    const r = await fetch('/outbox');
+    const data = await r.json();
+    if (data.text) {
+      if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+      addMessage(data.text, 'assistant');
+      saveMessages();
+      pendingText = data.text;
+      setState('play-ready');
+    }
+  } catch (e) {
+    console.error('Poll error:', e);
+  }
+}
+
+// ─── Play response ──────────────────────────────────────────
+async function playResponse() {
+  if (!pendingText) { setState('idle'); return; }
+  setState('speaking');
+
+  // Try Kokoro first
+  const kokoro = kokoroTTS || await loadKokoro();
+  if (kokoro) {
+    try {
+      const audio = await kokoro.generate(pendingText, { voice: KOKORO_VOICE });
+      if (!audioCtx) audioCtx = new AudioContext({ sampleRate: 24000 });
+      if (audioCtx.state === 'suspended') await audioCtx.resume();
+      const buffer = audioCtx.createBuffer(1, audio.data.length, 24000);
+      buffer.getChannelData(0).set(audio.data);
+      const source = audioCtx.createBufferSource();
+      source.buffer = buffer;
+      source.connect(audioCtx.destination);
+      currentAudioSource = source;
+      source.onended = () => {
+        currentAudioSource = null;
+        if (state === 'speaking') { pendingText = ''; setState('idle'); }
+      };
+      source.start();
+      // Safety timeout
+      setTimeout(() => { if (state === 'speaking') { stopAudio(); setState('idle'); } }, 60000);
+      return;
+    } catch (e) {
+      console.error('Kokoro generate failed:', e);
+    }
+  }
+
+  // Fallback: browser speechSynthesis
+  if (!synth) { setState('idle'); return; }
+  const utt = new SpeechSynthesisUtterance(pendingText);
+  const voices = synth.getVoices();
+  const preferred = ['Samantha', 'Karen', 'Daniel', 'Moira'];
+  for (const name of preferred) {
+    const v = voices.find(v => v.name.includes(name) && v.lang.startsWith('en'));
+    if (v) { utt.voice = v; break; }
+  }
+  utt.rate = 1.0;
+  utt.onend = () => { pendingText = ''; setState('idle'); };
+  utt.onerror = () => { pendingText = ''; setState('idle'); };
+  setTimeout(() => { if (state === 'speaking') setState('idle'); }, 30000);
+  synth.speak(utt);
+}
+
+// ─── Persistence ─────────────────────────────────────────────
+const STORAGE_KEY = 'drivecoding_messages';
+function saveMessages() {
+  const msgs = [];
+  transcript.querySelectorAll('.msg').forEach(el => {
+    msgs.push({
+      role: el.classList.contains('user') ? 'user' : 'assistant',
+      html: el.innerHTML,
+    });
+  });
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(msgs)); } catch(e) {}
+}
+function loadMessages() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
+    saved.forEach(m => {
+      const div = document.createElement('div');
+      div.className = `msg ${m.role}`;
+      div.innerHTML = m.html;
+      transcript.appendChild(div);
+    });
+    if (saved.length) transcript.scrollTop = transcript.scrollHeight;
+  } catch(e) {}
+}
+
+// ─── UI helpers ──────────────────────────────────────────────
+function addMessage(text, role) {
+  const div = document.createElement('div');
+  div.className = `msg ${role}`;
+  const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  div.innerHTML = `${escapeHtml(text)}<div class="meta">${time}</div>`;
+  transcript.appendChild(div);
+  transcript.scrollTop = transcript.scrollHeight;
+  saveMessages();
+}
+function escapeHtml(s) {
+  const d = document.createElement('div');
+  d.textContent = s;
+  return d.innerHTML;
+}
+function setStatus(text) {
+  statusText.textContent = text;
+}
+
+// ─── Event Handlers ──────────────────────────────────────────
+loopSpeed.addEventListener('input', () => { loopVal.textContent = loopSpeed.value + 's'; });
+function sendTextInput() {
+  const text = textInput.value.trim();
+  if (!text || state === 'waiting' || state === 'sending') return;
+  textInput.value = '';
+  sendToInbox(text);
+}
+sendBtn.addEventListener('click', sendTextInput);
+textInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') { e.preventDefault(); sendTextInput(); }
+});
+
+// Wake lock
+async function requestWakeLock() {
+  try { if ('wakeLock' in navigator) await navigator.wakeLock.request('screen'); } catch(e) {}
+}
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') requestWakeLock();
+});
+requestWakeLock();
+
+// ─── Init ────────────────────────────────────────────────────
+loadMessages();
+setState('idle');
+
+// Preload Kokoro in background (don't block UI)
+loadKokoro();
+</script>
+</body>
+</html>
