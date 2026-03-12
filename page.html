@@ -49,7 +49,6 @@
   .status-dot.active { background: var(--accent); animation: pulse 1.5s infinite; }
   .status-dot.recording { background: var(--recording); animation: pulse 0.8s infinite; }
   .status-dot.ready-play { background: var(--play); }
-  .status-dot.loading { background: #d29922; animation: pulse 1.2s infinite; }
   @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
 
   #transcript {
@@ -185,25 +184,6 @@
   .settings label { display: flex; align-items: center; gap: 4px; }
   .settings input[type="range"] { width: 60px; }
   #loop-val { min-width: 20px; text-align: center; }
-
-  /* TTS loading bar */
-  .tts-loading {
-    width: 100%;
-    max-width: 280px;
-    height: 4px;
-    background: var(--border);
-    border-radius: 2px;
-    overflow: hidden;
-    display: none;
-  }
-  .tts-loading.visible { display: block; }
-  .tts-loading-bar {
-    height: 100%;
-    background: var(--accent);
-    width: 0%;
-    transition: width 0.3s;
-    border-radius: 2px;
-  }
 </style>
 </head>
 <body>
@@ -223,9 +203,6 @@
     <span class="icon" id="btn-icon">&#x1F3A4;</span>
     <span class="label" id="btn-label">Record</span>
   </button>
-  <div class="tts-loading" id="tts-loading">
-    <div class="tts-loading-bar" id="tts-loading-bar"></div>
-  </div>
   <div class="text-input-row">
     <input type="text" id="text-input" placeholder="or type..." autocomplete="off" autocorrect="on">
     <button id="send-btn">
@@ -237,53 +214,14 @@
   </div>
 </div>
 
-<script type="module">
-import { KokoroTTS } from "https://cdn.jsdelivr.net/npm/kokoro-js@1.2.1/+esm";
-
-// ─── Kokoro TTS engine ──────────────────────────────────────
-let kokoroTTS = null;
-let kokoroLoading = false;
-const KOKORO_VOICE = 'af_heart'; // American female, Grade A
-
-const ttsLoadingDiv = document.getElementById('tts-loading');
-const ttsLoadingBar = document.getElementById('tts-loading-bar');
-
-async function loadKokoro() {
-  if (kokoroTTS) return kokoroTTS;
-  if (kokoroLoading) return null;
-  kokoroLoading = true;
-  ttsLoadingDiv.classList.add('visible');
-  ttsLoadingBar.style.width = '10%';
-  setStatus('Loading Kokoro TTS (~92MB)...');
-  statusDot.className = 'status-dot loading';
-  try {
-    ttsLoadingBar.style.width = '30%';
-    kokoroTTS = await KokoroTTS.from_pretrained("onnx-community/Kokoro-82M-v1.0-ONNX", {
-      dtype: "q8",
-      device: "wasm",
-    });
-    ttsLoadingBar.style.width = '100%';
-    setTimeout(() => { ttsLoadingDiv.classList.remove('visible'); }, 1000);
-    setStatus('Kokoro ready');
-    statusDot.className = 'status-dot';
-    return kokoroTTS;
-  } catch (e) {
-    console.error('Kokoro load failed:', e);
-    ttsLoadingDiv.classList.remove('visible');
-    setStatus('Kokoro failed — using browser TTS');
-    kokoroLoading = false;
-    return null;
-  }
-}
-
+<script>
 // ─── State machine ──────────────────────────────────────────
 let state = 'idle';
 let mediaRecorder = null;
 let audioChunks = [];
 let pollTimer = null;
 let pendingText = '';
-let currentAudioSource = null;
-let audioCtx = null;
+let currentAudio = null; // Audio element for Kokoro playback
 
 const transcript = document.getElementById('transcript');
 const walkieBtn = document.getElementById('walkie-btn');
@@ -305,42 +243,42 @@ function setState(newState) {
     case 'idle':
       btnIcon.textContent = '\u{1F3A4}';
       btnLabel.textContent = 'Record';
-      setStatus('Tap to talk', '');
+      setStatus('Tap to talk');
       break;
     case 'recording':
       walkieBtn.className = 'recording';
       statusDot.className = 'status-dot recording';
       btnIcon.textContent = '\u{23F9}';
       btnLabel.textContent = 'Stop';
-      setStatus('Recording...', '');
+      setStatus('Recording...');
       break;
     case 'sending':
       walkieBtn.className = 'waiting';
       statusDot.className = 'status-dot active';
       btnIcon.textContent = '\u{2197}';
       btnLabel.textContent = 'Sending';
-      setStatus('Transcribing...', '');
+      setStatus('Transcribing...');
       break;
     case 'waiting':
       walkieBtn.className = 'waiting';
       statusDot.className = 'status-dot active';
       btnIcon.textContent = '\u{231B}';
       btnLabel.textContent = 'Waiting';
-      setStatus('Waiting for Claude...', '');
+      setStatus('Waiting for Claude...');
       break;
     case 'play-ready':
       walkieBtn.className = 'play-ready';
       statusDot.className = 'status-dot ready-play';
       btnIcon.textContent = '\u{25B6}';
       btnLabel.textContent = 'Play';
-      setStatus('Response ready \u2014 tap to hear', '');
+      setStatus('Response ready \u2014 tap to hear');
       break;
     case 'speaking':
       walkieBtn.className = 'speaking';
       statusDot.className = 'status-dot active';
       btnIcon.textContent = '\u{1F50A}';
       btnLabel.textContent = 'Playing';
-      setStatus('Speaking...', '');
+      setStatus('Speaking...');
       break;
   }
 }
@@ -368,9 +306,10 @@ walkieBtn.addEventListener('click', async () => {
 
 // ─── Stop any playing audio ─────────────────────────────────
 function stopAudio() {
-  if (currentAudioSource) {
-    try { currentAudioSource.stop(); } catch(e) {}
-    currentAudioSource = null;
+  if (currentAudio) {
+    currentAudio.pause();
+    currentAudio.src = '';
+    currentAudio = null;
   }
   synth.cancel();
 }
@@ -397,7 +336,7 @@ async function startRecording() {
     setState('recording');
   } catch (e) {
     console.error('Mic error:', e);
-    setStatus('Mic access denied', '');
+    setStatus('Mic access denied');
   }
 }
 
@@ -421,12 +360,12 @@ async function sendAudio(blob, mimeType) {
       setState('waiting');
       startPolling();
     } else {
-      setStatus('No speech detected', '');
+      setStatus('No speech detected');
       setTimeout(() => setState('idle'), 1500);
     }
   } catch (e) {
     console.error(e);
-    setStatus('Send failed', '');
+    setStatus('Send failed');
     setTimeout(() => setState('idle'), 1500);
   }
 }
@@ -443,7 +382,7 @@ async function sendToInbox(text) {
     });
     if (r.ok) startPolling();
   } catch (e) {
-    setStatus('Send failed', '');
+    setStatus('Send failed');
     setTimeout(() => setState('idle'), 1500);
   }
 }
@@ -472,39 +411,47 @@ async function pollOutbox() {
   }
 }
 
-// ─── Play response ──────────────────────────────────────────
+// ─── Play response (server-side Kokoro TTS → audio element) ─
 async function playResponse() {
   if (!pendingText) { setState('idle'); return; }
   setState('speaking');
 
-  // Try Kokoro first
-  const kokoro = kokoroTTS || await loadKokoro();
-  if (kokoro) {
-    try {
-      const audio = await kokoro.generate(pendingText, { voice: KOKORO_VOICE });
-      if (!audioCtx) audioCtx = new AudioContext({ sampleRate: 24000 });
-      if (audioCtx.state === 'suspended') await audioCtx.resume();
-      const buffer = audioCtx.createBuffer(1, audio.data.length, 24000);
-      buffer.getChannelData(0).set(audio.data);
-      const source = audioCtx.createBufferSource();
-      source.buffer = buffer;
-      source.connect(audioCtx.destination);
-      currentAudioSource = source;
-      source.onended = () => {
-        currentAudioSource = null;
+  // Try server-side Kokoro TTS first
+  try {
+    const r = await fetch('/tts', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: pendingText }),
+    });
+    if (r.ok) {
+      const blob = await r.blob();
+      const url = URL.createObjectURL(blob);
+      currentAudio = new Audio(url);
+      currentAudio.onended = () => {
+        URL.revokeObjectURL(url);
+        currentAudio = null;
         if (state === 'speaking') { pendingText = ''; setState('idle'); }
       };
-      source.start();
+      currentAudio.onerror = () => {
+        URL.revokeObjectURL(url);
+        currentAudio = null;
+        fallbackTTS();
+      };
+      currentAudio.play();
       // Safety timeout
-      setTimeout(() => { if (state === 'speaking') { stopAudio(); setState('idle'); } }, 60000);
+      setTimeout(() => { if (state === 'speaking') { stopAudio(); pendingText = ''; setState('idle'); } }, 60000);
       return;
-    } catch (e) {
-      console.error('Kokoro generate failed:', e);
     }
+  } catch (e) {
+    console.error('Kokoro TTS fetch failed:', e);
   }
 
   // Fallback: browser speechSynthesis
-  if (!synth) { setState('idle'); return; }
+  fallbackTTS();
+}
+
+function fallbackTTS() {
+  if (!synth || !pendingText) { pendingText = ''; setState('idle'); return; }
   const utt = new SpeechSynthesisUtterance(pendingText);
   const voices = synth.getVoices();
   const preferred = ['Samantha', 'Karen', 'Daniel', 'Moira'];
@@ -588,9 +535,6 @@ requestWakeLock();
 // ─── Init ────────────────────────────────────────────────────
 loadMessages();
 setState('idle');
-
-// Preload Kokoro in background (don't block UI)
-loadKokoro();
 </script>
 </body>
 </html>

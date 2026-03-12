@@ -19,6 +19,7 @@ Security: Tailscale mesh only. No public URLs. No auth layer needed.
 """
 
 import argparse
+import io
 import json
 import os
 import socket
@@ -36,6 +37,22 @@ import uvicorn
 # ─── Config ─────────────────────────────────────────────────
 INBOX = Path("/tmp/claude_voice_inbox.jsonl")
 OUTBOX = Path("/tmp/claude_voice_outbox.txt")
+KOKORO_MODEL = Path("/tmp/kokoro-v1.0.onnx")
+KOKORO_VOICES = Path("/tmp/voices-v1.0.bin")
+
+# ─── Kokoro TTS (lazy-loaded) ───────────────────────────────
+_kokoro = None
+
+def get_kokoro():
+    global _kokoro
+    if _kokoro is None and KOKORO_MODEL.exists() and KOKORO_VOICES.exists():
+        try:
+            from kokoro_onnx import Kokoro
+            _kokoro = Kokoro(str(KOKORO_MODEL), str(KOKORO_VOICES))
+            print(f"  [TTS] Kokoro loaded")
+        except Exception as e:
+            print(f"  [TTS] Kokoro failed: {e}")
+    return _kokoro
 
 # ─── Routes ─────────────────────────────────────────────────
 
@@ -158,8 +175,33 @@ async def outbox_get(request):
         media_type="application/json")
 
 
+async def tts_post(request):
+    """Generate speech from text using Kokoro TTS. Returns WAV audio."""
+    body = await request.json()
+    text = body.get("text", "").strip()
+    if not text:
+        return Response(content=json.dumps({"error": "no text"}),
+                        media_type="application/json", status_code=400)
+    kokoro = get_kokoro()
+    if not kokoro:
+        return Response(content=json.dumps({"error": "kokoro not available"}),
+                        media_type="application/json", status_code=503)
+    try:
+        import soundfile as sf
+        samples, sr = kokoro.create(text, voice='af_heart', speed=1.0)
+        buf = io.BytesIO()
+        sf.write(buf, samples, sr, format='WAV')
+        buf.seek(0)
+        print(f"  [{datetime.now().strftime('%H:%M:%S')}] tts: {len(samples)/sr:.1f}s for '{text[:60]}...'")
+        return Response(content=buf.read(), media_type="audio/wav")
+    except Exception as e:
+        print(f"  [TTS] error: {e}")
+        return Response(content=json.dumps({"error": str(e)}),
+                        media_type="application/json", status_code=500)
+
+
 async def health(request):
-    return Response(content="cctg ok", media_type="text/plain")
+    return Response(content="drive-coding ok", media_type="text/plain")
 
 
 app = Starlette(routes=[
@@ -167,6 +209,7 @@ app = Starlette(routes=[
     Route("/inbox", inbox_post, methods=["POST"]),
     Route("/inbox-audio", inbox_audio, methods=["POST"]),
     Route("/outbox", outbox_get, methods=["GET"]),
+    Route("/tts", tts_post, methods=["POST"]),
     Route("/health", health),
 ])
 
